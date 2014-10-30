@@ -12,11 +12,14 @@ import matplotlib.pyplot as plt
 from nsls2 import core
 from enaml.qt import QtCore
 import numpy as np
+from datetime import datetime
+
 # from bubblegum.backend.mpl.cross_section_2d import (absolute_limit_factory,
 #                                                     CrossSection)
 from nsls2.fitting.model.physics_model import GaussianModel
 import lmfit
 
+import epics
 
 def plotter(title, xlabel, ylabel, ax=None, N=None, ln_sty=None, fit=False):
     """
@@ -103,6 +106,7 @@ def plotter(title, xlabel, ylabel, ax=None, N=None, ln_sty=None, fit=False):
         param['center'].max = 150
     time_tracker = {'old': time.time()}
 
+
     def inner(y, x):
         '''
         Update line with this data.  relim, autoscale, trigger redraw
@@ -140,16 +144,21 @@ def plotter(title, xlabel, ylabel, ax=None, N=None, ln_sty=None, fit=False):
 
     return inner
 
-# def imshower():
-#     fig = plt.figure()
-#     xsection = CrossSection(fig, interpolation='none',
-#                             limit_func=absolute_limit_factory((0, 1.5))
-#     )
-#
-#     def inner(msg, data):
-#         xsection.update_image(data['img'])
-#
-#     return inner
+class EpicsListener(QtCore.QObject):
+
+    event = QtCore.Signal(object, dict)
+    def __init__(self, **kwargs):
+        QtCore.QObject.__init__(self, **kwargs)
+        self._count = 0
+
+    def listen_to_pv(self, value = None, **kwargs):
+
+        data_dict = dict()
+        data_dict['img'] = value.reshape(1456,1936)
+        data_dict['count'] = self._count
+        print(data_dict['count'])
+        self.event.emit(datetime.now(), data_dict)
+        self._count += 1
 
 # stolen from other live demo
 class FrameSourcerBrownian(QtCore.QObject):
@@ -293,11 +302,17 @@ def scale_fluc(scale, count):
         return scale + .5
     return None
 
-frame_source = FrameSourcerBrownian(img_size, delay=1, step_scale=.5,
-                                    I_fluc_function=I_func_gaus,
-                                    step_fluc_function=scale_fluc,
-                                    max_count=center * 2
-                                    )
+# frame_source = FrameSourcerBrownian(img_size, delay=1, step_scale=.5,
+#                                     I_fluc_function=I_func_gaus,
+#                                     step_fluc_function=scale_fluc,
+#                                     max_count=center * 2
+#                                     )
+frame_source = EpicsListener()
+
+
+raw_image = epics.PV('XF:23IDA-BI:1{FS:1}image1:ArrayData', auto_monitor = True)
+raw_image.add_callback(frame_source.listen_to_pv)
+
 
 # set up mugglers
 # (name, fill_type, #num dims)
@@ -306,22 +321,25 @@ dm = DataMuggler((('T', 'pad', 0),
                   ('count', 'bfill', 0)
                   )
                  )
-dm2 = DataMuggler((('T', 'pad', 0),
+dm2 = DataMuggler((#('T', 'pad', 0),
                    ('max', 'bfill', 0),
                    ('x', 'bfill', 0),
                    ('y', 'bfill', 0),
+                   ('sum','bfill',0),
                    ('count', 'bfill', 0)
                    )
                   )
 # construct a watcher for the image + count on the main DataMuggler
-mw = MuggleWatcherLatest(dm, 'img', ['count', 'T'])
+mw = MuggleWatcherLatest(dm, 'img', ['count'])
 
 # set up pipe line components
 # multiply the image by 5 because we can
 p1 = PipelineComponent(lambda msg, data: (msg,
                                           {'img': data['img'] * 5,
                                            'count': data['count'],
-                                           'T': data['T']}))
+                                          # 'T': data['T']
+                                          }
+))
 
 
 def rough_center(img, axis):
@@ -337,7 +355,8 @@ p2 = PipelineComponent(lambda msg, data: (msg,
                                                                  axis=0),
                                           'y': rough_center(data['img'],
                                                                  axis=1),
-                                          'T': data['T']
+                                          'sum': np.sum(data['img']),
+                                          #'T': data['T']
                                           }))
 
 
@@ -370,6 +389,6 @@ cross_section_model = CrossSectionModel(data_muggler=dm, name='img',
 view = PipelineView(scalar_collection=scalar_collection,
                     cross_section_model=cross_section_model)
 view.show()
-frame_source.start()
+#frame_source.start()
 
 app.start()
