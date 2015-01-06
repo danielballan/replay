@@ -285,7 +285,7 @@ class DataMuggler(QtCore.QObject):
         Clear all of the data by re-initializing all of the internal
         data structures.
         """
-        self.recreate(cols=self._col_info)
+        self.recreate_columns(col_info=self._col_info)
 
     @property
     def col_dims(self):
@@ -516,7 +516,7 @@ class DataMuggler(QtCore.QObject):
         col : str
             The name of the column to extract the times for.
         """
-        return self._dataframe[col].dropna().index
+        return self._dataframe[col].dropna().index.values
 
     def get_last_value(self, ref_col, other_cols):
         """
